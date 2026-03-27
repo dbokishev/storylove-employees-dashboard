@@ -18,8 +18,17 @@ from utils.helpers import (
 
 load_dotenv()
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None or str(v).strip() == "":
+        return default
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-key")
+app.config["DEBUG"] = _env_bool("DEBUG", False)
 
 ALMATY_TZ = pytz.timezone("Asia/Almaty")
 
@@ -329,5 +338,9 @@ def api_employees():
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "5001"))
-    app.run(host="127.0.0.1", port=port, debug=True)
+    port = int(os.getenv("PORT", "5000"))
+    app.run(
+        host="127.0.0.1",
+        port=port,
+        debug=app.config.get("DEBUG", False),
+    )
