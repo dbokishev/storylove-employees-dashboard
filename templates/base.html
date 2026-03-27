@@ -3,22 +3,29 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{% block title %}Storylove — сотрудники{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <title>{% block title %}Storylove{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>[x-cloak]{display:none!important}</style>
 </head>
-<body>
-  <header>
-    <strong>Storylove</strong>
-    <nav>
-      <a href="{{ url_for('index') }}">Сегодня</a>
-      <a href="{{ url_for('employees_page') }}">Сотрудники</a>
-      <a href="{{ url_for('analytics_employee_page') }}">Аналитика: сотрудник</a>
-      <a href="{{ url_for('analytics_company_page') }}">Аналитика: компания</a>
-    </nav>
-  </header>
-  <main>
+<body class="bg-gray-50 min-h-screen">
+  <nav class="bg-white border-b border-gray-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex justify-between h-16">
+        <div class="flex items-center space-x-8">
+          <span class="text-lg font-semibold text-gray-900">Storylove</span>
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-1">
+            <a href="{{ url_for('index') }}" class="inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium {% if request.path == '/' %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:text-gray-700{% endif %}">Посещаемость</a>
+            <a href="{{ url_for('analytics_employee_page') }}" class="inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium {% if request.path.startswith('/analytics/employee') or request.path == '/analytics' %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:text-gray-700{% endif %}">Аналитика: сотрудник</a>
+            <a href="{{ url_for('analytics_company_page') }}" class="inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium {% if request.path == '/analytics/company' %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:text-gray-700{% endif %}">Аналитика: компания</a>
+            <a href="{{ url_for('employees_page') }}" class="inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium {% if request.path == '/employees' %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:text-gray-700{% endif %}">Сотрудники</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     {% block content %}{% endblock %}
   </main>
-  {% block scripts %}{% endblock %}
 </body>
 </html>

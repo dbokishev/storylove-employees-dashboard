@@ -2,7 +2,7 @@ import csv
 import io
 import os
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 import pytz
 from dotenv import load_dotenv
@@ -24,10 +24,13 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-key")
 ALMATY_TZ = pytz.timezone("Asia/Almaty")
 
 
-def _month_bounds(month_str: str):
+def _month_bounds(month_str: Optional[str]):
     try:
-        y, m = month_str.split("-")
-        year, month = int(y), int(m)
+        if month_str:
+            y, m = month_str.split("-")
+            year, month = int(y), int(m)
+        else:
+            raise ValueError
     except ValueError:
         now = datetime.now(ALMATY_TZ)
         year, month = now.year, now.month
@@ -46,6 +49,21 @@ def _parse_date_param(value: Optional[str]) -> date:
         except ValueError:
             pass
     return datetime.now(ALMATY_TZ).date()
+
+
+def _employees_payload(users: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for user in users:
+        out.append(
+            {
+                "userId": str(user.get("user_id", "")).strip(),
+                "name": user.get("name", ""),
+                "username": user.get("username", ""),
+                "fullName": user.get("full_name") or user.get("name") or "Без имени",
+            }
+        )
+    out.sort(key=lambda e: str(e.get("fullName", "")))
+    return out
 
 
 @app.route("/")
@@ -82,10 +100,17 @@ def api_today():
         logs = service.get_logs(date_from=d, date_to=d)
         schedule = service.get_schedule(date_from=d, date_to=d)
         holidays = service.get_holidays(date_from=d, date_to=d)
-        data = calculate_today_summary(
+        payload = calculate_today_summary(
             users, logs, schedule, holidays, d, datetime.now(ALMATY_TZ)
         )
-        return jsonify({"success": True, "data": data})
+        return jsonify(
+            {
+                "success": True,
+                "data": payload,
+                "targetDate": d.isoformat(),
+                "lastUpdate": datetime.now(ALMATY_TZ).isoformat(),
+            }
+        )
     except Exception as error:  # pylint: disable=broad-except
         return jsonify({"success": False, "error": str(error)}), 500
 
@@ -102,23 +127,28 @@ def api_analytics():
         schedule = service.get_schedule(date_from=first_day, date_to=last_day)
         holidays = service.get_holidays(date_from=first_day, date_to=last_day)
         employee_directory = service.get_employee_directory()
-        result = {
+
+        analytics = calculate_analytics(
+            users, logs, schedule, holidays, first_day, last_day
+        )
+        timesheet = calculate_timesheet(
+            users,
+            logs,
+            schedule,
+            holidays,
+            employee_directory,
+            first_day,
+            last_day,
+        )
+        result: Dict[str, Any] = {
             "month": month_str,
-            "analytics": calculate_analytics(
-                users, logs, schedule, holidays, first_day, last_day
-            ),
-            "timesheet": calculate_timesheet(
-                users,
-                logs,
-                schedule,
-                holidays,
-                employee_directory,
-                first_day,
-                last_day,
-            ),
+            "stats": analytics.get("stats", {}),
+            "calendar": analytics.get("calendar", {}),
+            "timesheet": timesheet,
+            "employees": _employees_payload(users),
         }
         if user_id:
-            result["employee"] = calculate_employee_month_analytics(
+            result["employeeAnalytics"] = calculate_employee_month_analytics(
                 users,
                 logs,
                 schedule,
@@ -133,7 +163,7 @@ def api_analytics():
         return jsonify({"success": False, "error": str(error)}), 500
 
 
-def _write_company_timesheet_csv(month_str: str):
+def _write_company_timesheet_csv(month_str: Optional[str]):
     service = get_sheets_service()
     first_day, last_day = _month_bounds(month_str)
     users = service.get_users()
@@ -174,7 +204,7 @@ def _write_company_timesheet_csv(month_str: str):
     return output.getvalue(), first_day
 
 
-def _write_employee_csv(month_str: str, user_id: str):
+def _write_employee_csv(month_str: Optional[str], user_id: str):
     service = get_sheets_service()
     first_day, last_day = _month_bounds(month_str)
     users = service.get_users()
@@ -186,23 +216,65 @@ def _write_employee_csv(month_str: str, user_id: str):
     )
     if data.get("error"):
         return None, None
+    emp = data.get("employee") or {}
+    stats = data.get("stats") or {}
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Дата", "День", "Статус", "Приход", "Уход", "Часы"])
-    emp = data.get("employee") or {}
-    name = emp.get("full_name") or emp.get("name") or "employee"
+    writer.writerow(["ФИО", emp.get("fullName", "")])
+    writer.writerow(["User ID", emp.get("userId", "")])
+    writer.writerow(["Месяц", first_day.strftime("%Y-%m")])
+    writer.writerow([])
+    writer.writerow(
+        [
+            "Опозданий",
+            "Рабочих_дней_факт",
+            "План_дней",
+            "Прогулов",
+            "Часов_отработано",
+            "Норма_часов",
+            "Процент_нормы",
+        ]
+    )
+    writer.writerow(
+        [
+            stats.get("lateCount"),
+            stats.get("workDays"),
+            stats.get("planDays"),
+            stats.get("absences"),
+            stats.get("workHours"),
+            stats.get("normHours"),
+            f'{stats.get("completionPercent")}%',
+        ]
+    )
+    writer.writerow([])
+    writer.writerow(
+        [
+            "Дата",
+            "Статус",
+            "Приход",
+            "Уход",
+            "Часы",
+            "Недоработка",
+            "Примечание",
+        ]
+    )
     for day in data.get("days", []):
+        note = day.get("holidayName") or day.get("scheduleNote") or ""
         writer.writerow(
             [
                 day.get("date"),
-                day.get("weekday"),
                 day.get("status"),
-                day.get("checkIn"),
-                day.get("checkOut"),
-                day.get("hoursWorked"),
+                day.get("checkIn") or "",
+                day.get("checkOut") or "",
+                day.get("hoursWorked") if day.get("hoursWorked") is not None else "",
+                day.get("underworkedBy") or "",
+                note,
             ]
         )
-    return output.getvalue(), name
+    safe_name = "".join(
+        c if c.isalnum() or c in " -_" else "_" for c in str(emp.get("fullName", "employee"))
+    )
+    return output.getvalue(), safe_name
 
 
 @app.route("/api/attendance/export/company.csv")
@@ -213,7 +285,7 @@ def export_company_csv():
         resp = make_response(text)
         resp.headers["Content-Type"] = "text/csv; charset=utf-8"
         resp.headers["Content-Disposition"] = (
-            f'attachment; filename="timesheet-company-{month_str}.csv"'
+            f'attachment; filename="company-{first_day.strftime("%Y-%m")}.csv"'
         )
         return resp
     except Exception as error:  # pylint: disable=broad-except
@@ -225,16 +297,16 @@ def export_employee_csv():
     month_str = request.args.get("month") or datetime.now(ALMATY_TZ).strftime("%Y-%m")
     user_id = request.args.get("user_id") or request.args.get("userId") or ""
     if not user_id:
-        return jsonify({"success": False, "error": "user_id required"}), 400
+        return jsonify({"success": False, "error": "user_id is required"}), 400
     try:
-        text, name = _write_employee_csv(month_str, user_id)
+        text, safe_name = _write_employee_csv(month_str, user_id)
         if text is None:
-            return jsonify({"success": False, "error": "user_not_found"}), 404
-        safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in str(name))
+            return jsonify({"success": False, "error": "Employee not found"}), 404
+        first_day, _ = _month_bounds(month_str)
         resp = make_response(text)
         resp.headers["Content-Type"] = "text/csv; charset=utf-8"
         resp.headers["Content-Disposition"] = (
-            f'attachment; filename="timesheet-employee-{safe}-{month_str}.csv"'
+            f'attachment; filename="employee-{safe_name}-{first_day.strftime("%Y-%m")}.csv"'
         )
         return resp
     except Exception as error:  # pylint: disable=broad-except
@@ -250,7 +322,8 @@ def export_timesheet_legacy():
 def api_employees():
     try:
         service = get_sheets_service()
-        return jsonify({"success": True, "data": service.get_users()})
+        users = service.get_users()
+        return jsonify({"success": True, "data": {"employees": _employees_payload(users)}})
     except Exception as error:  # pylint: disable=broad-except
         return jsonify({"success": False, "error": str(error)}), 500
 

@@ -1,88 +1,114 @@
 {% extends "base.html" %}
 {% block title %}Посещаемость — Storylove{% endblock %}
 {% block content %}
-<h1>Посещаемость по дате</h1>
-<div class="toolbar">
-  <label>Дата <input type="date" id="dateInput" /></label>
-  <button type="button" id="loadBtn">Обновить</button>
+<div x-data="todayData()" x-init="init()" x-cloak>
+  <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h1 class="text-3xl font-bold text-gray-900">Посещаемость</h1>
+      <p class="text-sm text-gray-500 mt-1">
+        Дата: <span class="font-medium text-gray-700" x-text="selectedDate"></span>
+        <span x-show="lastUpdateFormatted"> · обновлено <span x-text="lastUpdateFormatted"></span></span>
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <label for="date-picker" class="text-sm text-gray-600">Дата:</label>
+      <input id="date-picker" type="date" x-model="selectedDate" @change="loadData()" class="px-3 py-2 border rounded-lg" />
+    </div>
+  </div>
+
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6" x-show="summary">
+    <div class="bg-white p-3 rounded-lg shadow text-center"><div class="text-xs text-gray-500">Всего</div><div class="text-xl font-bold" x-text="summary.total"></div></div>
+    <div class="bg-white p-3 rounded-lg shadow text-center"><div class="text-xs text-gray-500">Присутствуют</div><div class="text-xl font-bold text-green-700" x-text="summary.present"></div></div>
+    <div class="bg-white p-3 rounded-lg shadow text-center"><div class="text-xs text-gray-500">Нет отметок</div><div class="text-xl font-bold text-red-600" x-text="summary.absent"></div></div>
+    <div class="bg-white p-3 rounded-lg shadow text-center"><div class="text-xs text-gray-500">Опоздали</div><div class="text-xl font-bold text-amber-600" x-text="summary.late"></div></div>
+    <div class="bg-white p-3 rounded-lg shadow text-center"><div class="text-xs text-gray-500">Работают сейчас</div><div class="text-xl font-bold text-emerald-600" x-text="summary.working"></div></div>
+  </div>
+
+  <div class="mb-4 flex flex-wrap gap-2">
+    <button type="button" @click="filter='all'" class="px-3 py-1 rounded bg-gray-200 text-sm">Все</button>
+    <button type="button" @click="filter='working'" class="px-3 py-1 rounded bg-gray-200 text-sm">Работают</button>
+    <button type="button" @click="filter='worked_no_checkout'" class="px-3 py-1 rounded bg-gray-200 text-sm">Уход не отмечен</button>
+    <button type="button" @click="filter='worked'" class="px-3 py-1 rounded bg-gray-200 text-sm">Отработали</button>
+    <button type="button" @click="filter='underworked'" class="px-3 py-1 rounded bg-gray-200 text-sm">Недоработали</button>
+    <button type="button" @click="filter='late_and_underworked'" class="px-3 py-1 rounded bg-gray-200 text-sm">Опоздал и недоработал</button>
+    <button type="button" @click="filter='absent'" class="px-3 py-1 rounded bg-gray-200 text-sm">Нет отметок</button>
+  </div>
+
+  <div class="bg-white rounded-lg shadow overflow-hidden">
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Сотрудник</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Статус</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Приход</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Уход</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Часы</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <template x-for="row in filteredRows" :key="row.userId + row.fullName">
+          <tr>
+            <td class="px-4 py-2 font-medium text-gray-900" x-text="row.fullName"></td>
+            <td class="px-4 py-2" x-html="getStatusBadge(row.status, row.isLate, row.underworkedBy)"></td>
+            <td class="px-4 py-2 text-gray-700" x-text="row.checkIn || '—'"></td>
+            <td class="px-4 py-2 text-gray-700" x-text="row.checkOut || '—'"></td>
+            <td class="px-4 py-2 text-gray-700" x-text="row.hoursWorked === 'N/A' || row.hoursWorked == null ? 'N/A' : row.hoursWorked"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+  <p class="text-gray-500 text-sm mt-4" x-show="error" x-text="error"></p>
 </div>
-<div id="err" class="error" style="display:none;"></div>
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr>
-        <th>Сотрудник</th>
-        <th>Статус</th>
-        <th>Приход</th>
-        <th>Уход</th>
-        <th>Часы</th>
-      </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-  </table>
-</div>
-{% endblock %}
-{% block scripts %}
 <script>
-const STATUS_LABELS = {
-  absent: "Нет отметок",
-  working: "Работает (уход не отмечен)",
-  worked_no_checkout: "Отработал день (уход не отмечен)",
-  worked: "Отработал полный день",
-  underworked: "Недоработка",
-  late_and_underworked: "Опоздал и недоработал",
-  day_off: "Выходной / не работает",
-};
-
-function todayStr() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function todayData() {
+  return {
+    selectedDate: new Date().toISOString().slice(0, 10),
+    employees: [],
+    summary: { total: 0, present: 0, absent: 0, late: 0, working: 0 },
+    lastUpdate: null,
+    filter: "all",
+    error: "",
+    get lastUpdateFormatted() {
+      if (!this.lastUpdate) return "";
+      try { return new Date(this.lastUpdate).toLocaleString("ru-RU"); } catch (e) { return ""; }
+    },
+    get filteredRows() {
+      if (this.filter === "all") return this.employees;
+      return this.employees.filter((r) => r.status === this.filter);
+    },
+    async init() { await this.loadData(); },
+    async loadData() {
+      this.error = "";
+      try {
+        const r = await fetch(`/api/attendance/today?date=${encodeURIComponent(this.selectedDate)}`);
+        const j = await r.json();
+        if (!j.success) throw new Error(j.error || "Ошибка");
+        this.employees = j.data.employees || [];
+        this.summary = j.data.summary || this.summary;
+        this.lastUpdate = j.lastUpdate || null;
+      } catch (e) {
+        this.error = String(e.message || e);
+      }
+    },
+    getStatusBadge(status, isLate, underworkedBy) {
+      if (status === "late_and_underworked") {
+        return `<span class="px-2 py-1 rounded bg-amber-100 text-amber-900 text-xs">Опоздал и недоработал${underworkedBy ? ` (${underworkedBy})` : ""}</span>`;
+      }
+      const badges = {
+        working: '<span class="px-2 py-1 rounded bg-green-100 text-green-800 text-xs">Работает</span>',
+        worked_no_checkout: '<span class="px-2 py-1 rounded bg-indigo-100 text-indigo-900 text-xs">Отработал день (уход не отмечен)</span>',
+        worked: '<span class="px-2 py-1 rounded bg-gray-100 text-gray-800 text-xs">Отработал</span>',
+        underworked: `<span class="px-2 py-1 rounded bg-orange-100 text-orange-800 text-xs">Недоработал${underworkedBy ? ` (${underworkedBy})` : ""}</span>`,
+        absent: '<span class="px-2 py-1 rounded bg-red-100 text-red-800 text-xs">Нет отметки</span>',
+        day_off: '<span class="px-2 py-1 rounded bg-blue-100 text-blue-800 text-xs">Выходной</span>',
+      };
+      if (isLate && (status === "working" || status === "worked" || status === "underworked") && status !== "late_and_underworked") {
+        return '<span class="px-2 py-1 rounded bg-yellow-100 text-yellow-800 text-xs">Опоздал</span>';
+      }
+      return badges[status] || badges.absent;
+    },
+  };
 }
-
-async function load() {
-  const el = document.getElementById("dateInput");
-  const date = el.value || todayStr();
-  el.value = date;
-  const err = document.getElementById("err");
-  err.style.display = "none";
-  const tbody = document.getElementById("tbody");
-  tbody.innerHTML = "<tr><td colspan='5' class='muted'>Загрузка…</td></tr>";
-  try {
-    const r = await fetch(`/api/attendance/today?date=${encodeURIComponent(date)}`);
-    const j = await r.json();
-    if (!j.success) throw new Error(j.error || "Ошибка");
-    const rows = j.data.rows || [];
-    tbody.innerHTML = rows
-      .map(
-        (row) => `<tr>
-        <td>${escapeHtml(row.fullName)}</td>
-        <td>${escapeHtml(STATUS_LABELS[row.status] || row.status)}</td>
-        <td>${escapeHtml(row.checkIn || "—")}</td>
-        <td>${escapeHtml(row.checkOut || "—")}</td>
-        <td>${row.hoursWorked == null ? "—" : escapeHtml(String(row.hoursWorked))}</td>
-      </tr>`
-      )
-      .join("");
-    if (!rows.length) tbody.innerHTML = "<tr><td colspan='5' class='muted'>Нет данных</td></tr>";
-  } catch (e) {
-    err.textContent = String(e.message || e);
-    err.style.display = "block";
-    tbody.innerHTML = "";
-  }
-}
-
-function escapeHtml(s) {
-  const d = document.createElement("div");
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-document.getElementById("loadBtn").addEventListener("click", load);
-document.getElementById("dateInput").addEventListener("change", load);
-document.getElementById("dateInput").value = todayStr();
-load();
 </script>
 {% endblock %}

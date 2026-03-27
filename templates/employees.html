@@ -1,52 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Сотрудники — Storylove{% endblock %}
 {% block content %}
-<h1>Сотрудники</h1>
-<div id="err" class="error" style="display:none;"></div>
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>ФИО</th>
-      </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-  </table>
+<div x-data="{ employees: [], error: '' }" x-init="fetch('/api/employees').then(r=>r.json()).then(j=>{if(j.success) employees=j.data.employees||[]; else error=j.error||''}).catch(e=>error=String(e))" x-cloak>
+  <h1 class="text-3xl font-bold text-gray-900 mb-6">Сотрудники</h1>
+  <p class="text-red-600 text-sm mb-4" x-show="error" x-text="error"></p>
+  <div class="bg-white rounded-lg shadow overflow-hidden">
+    <table class="min-w-full">
+      <thead class="bg-gray-50"><tr><th class="px-4 py-2 text-left text-xs text-gray-500">ID</th><th class="px-4 py-2 text-left text-xs text-gray-500">ФИО</th><th class="px-4 py-2 text-left text-xs text-gray-500">Username</th></tr></thead>
+      <tbody>
+        <template x-for="e in employees" :key="e.userId">
+          <tr class="border-t"><td class="px-4 py-2" x-text="e.userId"></td><td class="px-4 py-2 font-medium" x-text="e.fullName"></td><td class="px-4 py-2 text-gray-500" x-text="e.username || e.name || '—'"></td></tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
 </div>
-{% endblock %}
-{% block scripts %}
-<script>
-async function load() {
-  const err = document.getElementById("err");
-  const tbody = document.getElementById("tbody");
-  err.style.display = "none";
-  tbody.innerHTML = "<tr><td colspan='2' class='muted'>Загрузка…</td></tr>";
-  try {
-    const r = await fetch("/api/employees");
-    const j = await r.json();
-    if (!j.success) throw new Error(j.error || "Ошибка");
-    const rows = j.data || [];
-    tbody.innerHTML = rows
-      .map(
-        (u) => `<tr>
-        <td>${escapeHtml(String(u.user_id || u.userId || ""))}</td>
-        <td>${escapeHtml(String(u.full_name || u.fullName || u.name || "—"))}</td>
-      </tr>`
-      )
-      .join("");
-    if (!rows.length) tbody.innerHTML = "<tr><td colspan='2' class='muted'>Пусто</td></tr>";
-  } catch (e) {
-    err.textContent = String(e.message || e);
-    err.style.display = "block";
-    tbody.innerHTML = "";
-  }
-}
-function escapeHtml(s) {
-  const d = document.createElement("div");
-  d.textContent = s;
-  return d.innerHTML;
-}
-load();
-</script>
 {% endblock %}

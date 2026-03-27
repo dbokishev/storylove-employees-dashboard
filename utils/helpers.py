@@ -214,7 +214,7 @@ def calculate_today_summary(
             continue
         day_logs = user_day_logs.get((uid, date_str), [])
         cin, cout = _extract_check_times(day_logs)
-        st, _def = _resolve_day_status(cin, cout, target_date, now_almaty)
+        st, udef = _resolve_day_status(cin, cout, target_date, now_almaty)
         wh = "N/A" if st in ("worked_no_checkout", "working") else calculate_hours(cin, cout)
         rows.append(
             {
@@ -225,10 +225,24 @@ def calculate_today_summary(
                 "checkOut": cout or "",
                 "hoursWorked": wh,
                 "isLate": is_late(cin) if cin else False,
+                "underworkedBy": udef,
             }
         )
     rows.sort(key=lambda r: str(r.get("fullName", "")))
-    return {"date": date_str, "rows": rows}
+    summary = {"total": 0, "present": 0, "absent": 0, "late": 0, "working": 0}
+    for r in rows:
+        if r.get("status") == "day_off":
+            continue
+        summary["total"] += 1
+        if r.get("status") == "absent":
+            summary["absent"] += 1
+        else:
+            summary["present"] += 1
+        if r.get("isLate"):
+            summary["late"] += 1
+        if r.get("status") == "working":
+            summary["working"] += 1
+    return {"date": date_str, "employees": rows, "summary": summary}
 
 
 def calculate_employee_month_analytics(
@@ -318,8 +332,11 @@ def calculate_employee_month_analytics(
 
     norm_minutes = planned_days * NORM_DAY_MINUTES
     completion = int(round((total_minutes / norm_minutes) * 100)) if norm_minutes else 0
+    emp_out = dict(selected_user)
+    emp_out["fullName"] = full_name
+    emp_out["userId"] = str(target_user_id).strip()
     return {
-        "employee": selected_user,
+        "employee": emp_out,
         "stats": {
             "lateCount": late_count,
             "workDays": worked_days,
@@ -422,12 +439,11 @@ def calculate_analytics(
     first_day: date,
     last_day: date,
 ) -> Dict[str, Any]:
-    """Сводка по компании за месяц (без помесячной сетки календаря в UI)."""
+    """Сводка по компании за месяц + календарь по рабочим дням (как в прежней версии UI)."""
     holidays_map = _build_holidays_map(holidays)
     schedule_index = _build_schedule_index(schedule)
     user_day_logs = _build_user_day_logs(logs)
     user_ids = [str(u.get("user_id", "")).strip() for u in users if str(u.get("user_id", "")).strip()]
-    n_users = len(user_ids)
 
     plan_dates: List[date] = []
     cur = first_day
@@ -440,27 +456,52 @@ def calculate_analytics(
     present_per_day: List[int] = []
     late_days_flags: List[bool] = []
     absence_days_flags: List[bool] = []
+    calendar: Dict[str, Dict[str, Any]] = {}
 
     for d in plan_dates:
         ds = d.strftime("%Y-%m-%d")
         present = 0
+        absent = 0
+        late_cnt = 0
         late_any = False
         absent_any = False
+        expected = 0
         for uid in user_ids:
             u = next((x for x in users if str(x.get("user_id", "")).strip() == uid), None)
             fn = str(u.get("full_name") or u.get("name") or "").strip() if u else ""
             if (fn, ds) in schedule_index:
                 continue
+            expected += 1
             cin, cout = _extract_check_times(user_day_logs.get((uid, ds), []))
             if cin:
                 present += 1
                 if is_late(cin):
+                    late_cnt += 1
                     late_any = True
             else:
+                absent += 1
                 absent_any = True
         present_per_day.append(present)
         late_days_flags.append(late_any)
         absence_days_flags.append(absent_any)
+
+        day_status = "good"
+        if expected > 0:
+            ratio = absent / expected
+            if ratio == 0:
+                day_status = "perfect"
+            elif ratio < 0.2:
+                day_status = "good"
+            elif ratio < 0.5:
+                day_status = "warning"
+            else:
+                day_status = "bad"
+        calendar[ds] = {
+            "present": present,
+            "absent": absent,
+            "late": late_cnt,
+            "status": day_status,
+        }
 
     plan_days = len(plan_dates)
     avg_att = (
@@ -471,8 +512,15 @@ def calculate_analytics(
 
     return {
         "planDays": plan_days,
-        "headcount": n_users,
+        "headcount": len(user_ids),
         "avgPresentPerDay": avg_att,
         "daysWithLate": days_with_late,
         "daysWithAbsence": days_with_absence,
+        "calendar": calendar,
+        "stats": {
+            "totalDays": plan_days,
+            "avgPresent": avg_att,
+            "lateDays": days_with_late,
+            "absentDays": days_with_absence,
+        },
     }

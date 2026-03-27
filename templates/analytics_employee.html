@@ -1,140 +1,104 @@
 {% extends "base.html" %}
-{% block title %}Аналитика сотрудника — Storylove{% endblock %}
+{% block title %}Аналитика — сотрудник{% endblock %}
 {% block content %}
-<h1>Аналитика: сотрудник</h1>
-<div class="toolbar">
-  <label>Месяц <input type="month" id="monthInput" /></label>
-  <label>Сотрудник
-    <select id="userSelect"><option value="">—</option></select>
-  </label>
-  <button type="button" id="loadBtn">Загрузить</button>
-  <a class="btn secondary" id="csvLink" href="#" style="display:none;">CSV</a>
-</div>
-<div id="err" class="error" style="display:none;"></div>
-<div id="empBlock" style="display:none;">
-  <h2 id="empTitle" class="muted"></h2>
-  <div class="stats" id="stats"></div>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Дата</th>
-          <th>День</th>
-          <th>Статус</th>
-          <th>Приход</th>
-          <th>Уход</th>
-          <th>Часы</th>
-        </tr>
-      </thead>
-      <tbody id="tbody"></tbody>
-    </table>
+<div x-data="employeeAnalyticsPage()" x-init="init()" x-cloak>
+  <div class="mb-6">
+    <h1 class="text-3xl font-bold text-gray-900">Аналитика по сотруднику</h1>
+    <p class="text-sm text-gray-500 mt-1">Месячная детализация и выгрузка по одному человеку</p>
+  </div>
+
+  <div class="mb-6 flex flex-wrap gap-3 items-end">
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Месяц</label>
+      <input type="month" x-model="selectedMonth" @change="loadData()" class="px-3 py-2 border rounded-lg" />
+    </div>
+    <div class="min-w-[220px]">
+      <label class="block text-xs text-gray-500 mb-1">Сотрудник</label>
+      <select x-model="selectedUserId" @change="loadData()" class="px-3 py-2 border rounded-lg w-full">
+        <option value="">Выберите сотрудника</option>
+        <template x-for="e in employees" :key="e.userId">
+          <option :value="e.userId" x-text="e.fullName"></option>
+        </template>
+      </select>
+    </div>
+    <a
+      :href="employeeCsvUrl"
+      class="inline-flex items-center px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+      :class="{ 'pointer-events-none opacity-50': !selectedUserId }"
+    >Скачать CSV</a>
+  </div>
+
+  <div class="bg-amber-50 border border-amber-100 rounded-lg p-4 mb-6 text-amber-900 text-sm" x-show="!selectedUserId">
+    Выберите сотрудника, чтобы увидеть аналитику и скачать CSV.
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8" x-show="employeeAnalytics">
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">Опозданий</div><div class="text-2xl font-bold" x-text="employeeAnalytics?.stats?.lateCount"></div></div>
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">Рабочих дней (факт/план)</div><div class="text-2xl font-bold"><span x-text="employeeAnalytics?.stats?.workDays"></span>/<span x-text="employeeAnalytics?.stats?.planDays"></span></div></div>
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">Прогулов</div><div class="text-2xl font-bold" x-text="employeeAnalytics?.stats?.absences"></div></div>
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">Часы</div><div class="text-xl font-bold"><span x-text="employeeAnalytics?.stats?.workHours"></span> / <span x-text="employeeAnalytics?.stats?.normHours"></span></div><div class="text-sm text-gray-600"><span x-text="employeeAnalytics?.stats?.completionPercent"></span>% нормы</div></div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow overflow-hidden" x-show="employeeAnalytics">
+    <div class="p-4 border-b font-semibold text-gray-900">Дни месяца</div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full">
+        <thead class="bg-gray-50"><tr><th class="px-4 py-2 text-left text-xs text-gray-500">Дата</th><th class="px-4 py-2 text-left">Статус</th><th class="px-4 py-2 text-left">Приход</th><th class="px-4 py-2 text-left">Уход</th><th class="px-4 py-2 text-left">Часы</th><th class="px-4 py-2 text-left">Примечание</th></tr></thead>
+        <tbody>
+          <template x-for="day in employeeAnalytics?.days || []" :key="day.date">
+            <tr class="border-t">
+              <td class="px-4 py-2"><span x-text="day.date"></span><span x-show="day.holidayName"> 🎉</span></td>
+              <td class="px-4 py-2" x-html="statusBadge(day)"></td>
+              <td class="px-4 py-2" x-text="day.checkIn || '-'"></td>
+              <td class="px-4 py-2" x-text="day.checkOut || '-'"></td>
+              <td class="px-4 py-2" x-text="day.hoursWorked ?? '-'"></td>
+              <td class="px-4 py-2 text-gray-500" x-text="day.holidayName || day.scheduleNote || '-'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
-{% endblock %}
-{% block scripts %}
 <script>
-const STATUS_LABELS = {
-  absent: "Нет отметок",
-  working: "Работает (уход не отмечен)",
-  worked_no_checkout: "Отработал день (уход не отмечен)",
-  worked: "Отработал полный день",
-  underworked: "Недоработка",
-  late_and_underworked: "Опоздал и недоработал",
-  day_off: "Выходной",
-};
-
-function monthStr(d = new Date()) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+function employeeAnalyticsPage() {
+  const n = new Date();
+  const m = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`;
+  return {
+    selectedMonth: m,
+    selectedUserId: "",
+    employees: [],
+    employeeAnalytics: null,
+    get employeeCsvUrl() {
+      if (!this.selectedUserId) return "#";
+      return `/api/attendance/export/employee.csv?month=${this.selectedMonth}&user_id=${encodeURIComponent(this.selectedUserId)}`;
+    },
+    async init() { await this.loadData(); },
+    async loadData() {
+      let url = `/api/attendance/analytics?month=${this.selectedMonth}`;
+      if (this.selectedUserId) url += `&user_id=${encodeURIComponent(this.selectedUserId)}`;
+      const r = await fetch(url);
+      const j = await r.json();
+      if (!j.success) return;
+      this.employees = j.data.employees || [];
+      if (!this.selectedUserId && this.employees.length) {
+        this.selectedUserId = this.employees[0].userId;
+        return this.loadData();
+      }
+      this.employeeAnalytics = j.data.employeeAnalytics || null;
+    },
+    statusBadge(day) {
+      if (day.holidayName) return '<span class="px-2 py-1 rounded bg-purple-100 text-purple-800 text-xs">Праздник</span>';
+      if (day.scheduleType) return '<span class="px-2 py-1 rounded bg-blue-100 text-blue-800 text-xs">Выходной</span>';
+      if (day.status === "late_and_underworked") return `<span class="px-2 py-1 rounded bg-amber-100 text-amber-900 text-xs">Опоздал и недоработал${day.underworkedBy ? ` (${day.underworkedBy})` : ""}</span>`;
+      if (day.status === "worked") return '<span class="px-2 py-1 rounded bg-gray-100 text-gray-800 text-xs">Отработал</span>';
+      if (day.status === "underworked") return `<span class="px-2 py-1 rounded bg-orange-100 text-orange-800 text-xs">Недоработал${day.underworkedBy ? ` (${day.underworkedBy})` : ""}</span>`;
+      if (day.status === "working") return '<span class="px-2 py-1 rounded bg-green-100 text-green-800 text-xs">Работает</span>';
+      if (day.status === "worked_no_checkout") return '<span class="px-2 py-1 rounded bg-indigo-100 text-indigo-900 text-xs">Отработал день (уход не отмечен)</span>';
+      if (day.status === "day_off") return '<span class="px-2 py-1 rounded bg-blue-100 text-blue-800 text-xs">Выходной</span>';
+      return '<span class="px-2 py-1 rounded bg-red-100 text-red-800 text-xs">Нет отметки</span>';
+    },
+  };
 }
-
-function escapeHtml(s) {
-  const d = document.createElement("div");
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-async function loadUsers() {
-  const r = await fetch("/api/employees");
-  const j = await r.json();
-  if (!j.success) throw new Error(j.error);
-  const sel = document.getElementById("userSelect");
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">— выберите —</option>';
-  (j.data || []).forEach((u) => {
-    const id = String(u.user_id || u.userId || "");
-    const name = u.full_name || u.fullName || u.name || id;
-    const o = document.createElement("option");
-    o.value = id;
-    o.textContent = name;
-    sel.appendChild(o);
-  });
-  if (cur) sel.value = cur;
-}
-
-async function load() {
-  const month = document.getElementById("monthInput").value || monthStr();
-  document.getElementById("monthInput").value = month;
-  const uid = document.getElementById("userSelect").value;
-  const err = document.getElementById("err");
-  const block = document.getElementById("empBlock");
-  err.style.display = "none";
-  if (!uid) {
-    block.style.display = "none";
-    return;
-  }
-  try {
-    const r = await fetch(
-      `/api/attendance/analytics?month=${encodeURIComponent(month)}&user_id=${encodeURIComponent(uid)}`
-    );
-    const j = await r.json();
-    if (!j.success) throw new Error(j.error || "Ошибка");
-    const payload = j.data.employee;
-    if (!payload || payload.error) throw new Error("Сотрудник не найден");
-    const st = payload.stats || {};
-    const u = payload.employee || {};
-    const name = u.full_name || u.fullName || u.name || "";
-    document.getElementById("empTitle").textContent = name;
-    document.getElementById("stats").innerHTML = `
-      <div class="stat-card"><div class="label">Плановых дней</div><div class="value">${st.planDays ?? "—"}</div></div>
-      <div class="stat-card"><div class="label">Отработано дней</div><div class="value">${st.workDays ?? "—"}</div></div>
-      <div class="stat-card"><div class="label">Опозданий</div><div class="value">${st.lateCount ?? "—"}</div></div>
-      <div class="stat-card"><div class="label">Прогулов</div><div class="value">${st.absences ?? "—"}</div></div>
-      <div class="stat-card"><div class="label">Часы (факт)</div><div class="value">${st.workHours ?? "—"}</div></div>
-      <div class="stat-card"><div class="label">Норма часов</div><div class="value">${st.normHours ?? "—"}</div></div>
-      <div class="stat-card"><div class="label">% нормы</div><div class="value">${st.completionPercent ?? "—"}%</div></div>
-    `;
-    const tbody = document.getElementById("tbody");
-    tbody.innerHTML = (payload.days || [])
-      .map(
-        (day) => `<tr>
-        <td>${escapeHtml(day.date)}</td>
-        <td>${escapeHtml(day.weekday)}</td>
-        <td>${escapeHtml(STATUS_LABELS[day.status] || day.status)}</td>
-        <td>${escapeHtml(day.checkIn || "—")}</td>
-        <td>${escapeHtml(day.checkOut || "—")}</td>
-        <td>${escapeHtml(String(day.hoursWorked ?? "—"))}</td>
-      </tr>`
-      )
-      .join("");
-    block.style.display = "block";
-    const a = document.getElementById("csvLink");
-    a.href = `/api/attendance/export/employee.csv?month=${encodeURIComponent(month)}&user_id=${encodeURIComponent(uid)}`;
-    a.style.display = "inline-block";
-  } catch (e) {
-    err.textContent = String(e.message || e);
-    err.style.display = "block";
-    block.style.display = "none";
-  }
-}
-
-document.getElementById("monthInput").value = monthStr();
-document.getElementById("loadBtn").addEventListener("click", load);
-document.getElementById("userSelect").addEventListener("change", load);
-loadUsers().then(load).catch((e) => {
-  document.getElementById("err").textContent = String(e.message || e);
-  document.getElementById("err").style.display = "block";
-});
 </script>
 {% endblock %}

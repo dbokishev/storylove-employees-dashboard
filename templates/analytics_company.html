@@ -1,90 +1,109 @@
 {% extends "base.html" %}
-{% block title %}Аналитика компании — Storylove{% endblock %}
+{% block title %}Аналитика — компания{% endblock %}
 {% block content %}
-<h1>Аналитика: компания</h1>
-<div class="toolbar">
-  <label>Месяц <input type="month" id="monthInput" /></label>
-  <button type="button" id="loadBtn">Загрузить</button>
-  <a class="btn secondary" id="csvLink" href="#">Табель CSV</a>
-</div>
-<div id="err" class="error" style="display:none;"></div>
-<div id="block" style="display:none;">
-  <div class="stats" id="stats"></div>
-  <h2>Табель</h2>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>ФИО</th>
-          <th>Должность</th>
-          <th>Дней (факт)</th>
-          <th>Опозданий</th>
-          <th>Прогулов</th>
-          <th>Всего часов</th>
-          <th>Ср. ч/день</th>
-          <th>% нормы</th>
-        </tr>
-      </thead>
-      <tbody id="tbody"></tbody>
-    </table>
+<div x-data="companyAnalyticsPage()" x-init="init()" x-cloak>
+  <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h1 class="text-3xl font-bold text-gray-900">Аналитика по компании</h1>
+      <p class="text-sm text-gray-500 mt-1">Сводный табель и календарь по команде за месяц</p>
+    </div>
+    <div class="flex flex-wrap gap-3 items-end">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Месяц</label>
+        <input type="month" x-model="selectedMonth" @change="loadData()" class="px-3 py-2 border rounded-lg" />
+      </div>
+      <a
+        :href="`/api/attendance/export/company.csv?month=${selectedMonth}`"
+        class="inline-flex items-center px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+      >Скачать CSV (компания)</a>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8" x-show="stats">
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">Рабочих дней в месяце</div><div class="text-2xl font-bold" x-text="stats.totalDays"></div></div>
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">Средняя посещаемость</div><div class="text-2xl font-bold" x-text="stats.avgPresent"></div></div>
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">Дней с опозданиями / прогулами</div><div class="text-2xl font-bold"><span x-text="stats.lateDays"></span> / <span x-text="stats.absentDays"></span></div></div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow p-4 mb-8" x-show="calendarEntries.length">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Календарь (рабочие дни)</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7 gap-2">
+      <template x-for="day in calendarEntries" :key="day.date">
+        <div class="border rounded-lg p-2 text-xs" :class="dayClass(day.status)">
+          <div class="font-semibold" x-text="day.date"></div>
+          <div>Пришли: <span x-text="day.present"></span></div>
+          <div>Прогулы: <span x-text="day.absent"></span></div>
+          <div>Опозд.: <span x-text="day.late"></span></div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow overflow-hidden" x-show="timesheet.rows?.length">
+    <div class="p-4 border-b font-semibold text-gray-900">Табель за месяц (вся команда)</div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-2 text-left text-xs text-gray-500">ФИО</th>
+            <th class="px-4 py-2 text-left">Должность</th>
+            <th class="px-4 py-2 text-left">Рабочих дней</th>
+            <th class="px-4 py-2 text-left">Опозданий</th>
+            <th class="px-4 py-2 text-left">Прогулов</th>
+            <th class="px-4 py-2 text-left">Всего часов</th>
+            <th class="px-4 py-2 text-left">Ср. ч/день</th>
+            <th class="px-4 py-2 text-left">% нормы</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="row in timesheet.rows" :key="row.userId + row.fullName">
+            <tr class="border-t">
+              <td class="px-4 py-2 font-medium" x-text="row.fullName"></td>
+              <td class="px-4 py-2" x-text="row.position"></td>
+              <td class="px-4 py-2"><span x-text="row.workDaysFact"></span>/<span x-text="row.workDaysPlan"></span></td>
+              <td class="px-4 py-2" x-text="row.lateCount"></td>
+              <td class="px-4 py-2" x-text="row.absences"></td>
+              <td class="px-4 py-2" x-text="row.totalHours"></td>
+              <td class="px-4 py-2" x-text="row.avgHoursPerDay"></td>
+              <td class="px-4 py-2"><span x-text="row.completionPercent"></span>%</td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
-{% endblock %}
-{% block scripts %}
 <script>
-function monthStr(d = new Date()) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+function companyAnalyticsPage() {
+  const n = new Date();
+  const m = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`;
+  return {
+    selectedMonth: m,
+    stats: { totalDays: 0, avgPresent: 0, lateDays: 0, absentDays: 0 },
+    calendar: {},
+    timesheet: { rows: [] },
+    get calendarEntries() {
+      return Object.entries(this.calendar || {}).map(([date, v]) => ({ date, ...v }));
+    },
+    dayClass(status) {
+      const map = {
+        perfect: "bg-emerald-50 border-emerald-200",
+        good: "bg-lime-50 border-lime-200",
+        warning: "bg-amber-50 border-amber-200",
+        bad: "bg-rose-50 border-rose-200",
+      };
+      return map[status] || "bg-gray-50 border-gray-200";
+    },
+    async init() { await this.loadData(); },
+    async loadData() {
+      const r = await fetch(`/api/attendance/analytics?month=${this.selectedMonth}`);
+      const j = await r.json();
+      if (!j.success) return;
+      this.stats = j.data.stats || this.stats;
+      this.calendar = j.data.calendar || {};
+      this.timesheet = j.data.timesheet || { rows: [] };
+    },
+  };
 }
-
-function escapeHtml(s) {
-  const d = document.createElement("div");
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-async function load() {
-  const month = document.getElementById("monthInput").value || monthStr();
-  document.getElementById("monthInput").value = month;
-  const err = document.getElementById("err");
-  err.style.display = "none";
-  document.getElementById("csvLink").href = `/api/attendance/export/company.csv?month=${encodeURIComponent(month)}`;
-  try {
-    const r = await fetch(`/api/attendance/analytics?month=${encodeURIComponent(month)}`);
-    const j = await r.json();
-    if (!j.success) throw new Error(j.error || "Ошибка");
-    const a = j.data.analytics || {};
-    const ts = j.data.timesheet || {};
-    document.getElementById("stats").innerHTML = `
-      <div class="stat-card"><div class="label">Рабочих дней в месяце (план)</div><div class="value">${a.planDays ?? "—"}</div></div>
-      <div class="stat-card"><div class="label">Средняя посещаемость (чел. в день)</div><div class="value">${a.avgPresentPerDay ?? "—"}</div></div>
-      <div class="stat-card"><div class="label">Дней с опозданиями / с прогулами</div><div class="value">${a.daysWithLate ?? "—"} / ${a.daysWithAbsence ?? "—"}</div></div>
-    `;
-    const rows = ts.rows || [];
-    document.getElementById("tbody").innerHTML = rows
-      .map(
-        (row) => `<tr>
-        <td>${escapeHtml(row.fullName)}</td>
-        <td>${escapeHtml(row.position)}</td>
-        <td>${row.workDaysFact}</td>
-        <td>${row.lateCount}</td>
-        <td>${row.absences}</td>
-        <td>${escapeHtml(row.totalHours)}</td>
-        <td>${escapeHtml(row.avgHoursPerDay)}</td>
-        <td>${row.completionPercent}%</td>
-      </tr>`
-      )
-      .join("");
-    document.getElementById("block").style.display = "block";
-  } catch (e) {
-    err.textContent = String(e.message || e);
-    err.style.display = "block";
-  }
-}
-
-document.getElementById("monthInput").value = monthStr();
-document.getElementById("loadBtn").addEventListener("click", load);
-load();
 </script>
 {% endblock %}
