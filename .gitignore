@@ -1,5 +1,32 @@
+# Virtual env
 venv/
+.venv/
+
+# Secrets & local env (шаблон .env.example — в репозитории)
 .env
-__pycache__/
-*.pyc
+.env.*
+!.env.example
 credentials.json
+*-credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Flask
+instance/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.log

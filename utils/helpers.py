@@ -72,7 +72,125 @@ def _norm_date_key(raw: Any) -> str:
     s = str(raw or "").strip()
     if not s:
         return ""
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    for fmt in ("%d.%m.%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(s[:10], fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
     return s[:10]
+
+
+def _norm_user_id(raw: Any) -> str:
+    if raw is None or raw == "":
+        return ""
+    if isinstance(raw, float):
+        if raw == int(raw):
+            return str(int(raw))
+    return str(raw).strip()
+
+
+def _date_from_log_row(row: Dict[str, Any]) -> str:
+    ds = _norm_date_key(row.get("date") or row.get("Date") or row.get("Дата") or row.get("day"))
+    if ds:
+        return ds
+    raw = row.get("raw_timestamp") or row.get("timestamp") or row.get("created_at") or row.get("datetime")
+    if not raw:
+        return ""
+    s = str(raw).strip()
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    if len(s) >= 10 and s[2] in ".//" and s[5] in ".//":
+        return _norm_date_key(s[:10])
+    return ""
+
+
+def _row_check_in_out(row: Dict[str, Any]) -> Tuple[Optional[Any], Optional[Any]]:
+    """Гибко ищем колонки прихода/ухода (разные заголовки в Google Sheets)."""
+    cin = None
+    cout = None
+    for key, val in row.items():
+        if val is None or val == "":
+            continue
+        kl = str(key).lower().replace(" ", "_").replace("-", "_")
+        if kl in (
+            "check_in",
+            "checkin",
+            "time_in",
+            "приход",
+            "время_прихода",
+            "check-in",
+        ):
+            cin = val
+        if kl in (
+            "check_out",
+            "checkout",
+            "time_out",
+            "уход",
+            "время_ухода",
+            "check-out",
+        ):
+            cout = val
+    if cin is None:
+        cin = row.get("check_in") or row.get("check_in_time") or row.get("Приход")
+    if cout is None:
+        cout = row.get("check_out") or row.get("check_out_time") or row.get("Уход")
+    return cin, cout
+
+
+def _time_min(a: str, b: str) -> str:
+    if not a:
+        return b
+    if not b:
+        return a
+    ta, tb = _parse_time(a), _parse_time(b)
+    if ta and tb:
+        return a if ta <= tb else b
+    return a
+
+
+def _time_max(a: str, b: str) -> str:
+    if not a:
+        return b
+    if not b:
+        return a
+    ta, tb = _parse_time(a), _parse_time(b)
+    if ta and tb:
+        return a if ta >= tb else b
+    return b
+
+
+def _event_direction(ev: str) -> Optional[str]:
+    """in / out — без ложного срабатывания на подстроки."""
+    ev = str(ev or "").lower().strip()
+    if not ev:
+        return None
+    if any(
+        x in ev
+        for x in (
+            "check-out",
+            "checkout",
+            "check_out",
+            "уход",
+            "выход",
+            "leave",
+        )
+    ):
+        return "out"
+    if any(
+        x in ev
+        for x in (
+            "check-in",
+            "checkin",
+            "check_in",
+            "приход",
+            "вход",
+            "arrival",
+        )
+    ):
+        return "in"
+    return None
 
 
 def _build_holidays_map(holidays: List[Dict[str, Any]]) -> Dict[str, str]:
@@ -97,49 +215,71 @@ def _build_schedule_index(schedule: List[Dict[str, Any]]) -> Dict[Tuple[str, str
 
 
 def _coerce_log_rows(raw_logs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Приводим логи к виду с check_in / check_out (первая отметка входа, последняя выхода)."""
-    flat: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    """
+    Несколько строк Logs на одного человека в один день (только приход / только уход)
+    объединяем: самый ранний приход, самый поздний уход. Поток check-in/check-out сливаем с колонками.
+    """
+    merged: Dict[Tuple[str, str], Dict[str, str]] = {}
     stream: Dict[Tuple[str, str], List[Tuple[str, str]]] = defaultdict(list)
 
     for row in raw_logs:
-        uid = str(row.get("user_id") or row.get("userId") or row.get("User ID") or "").strip()
-        ds = _norm_date_key(row.get("date") or row.get("Date"))
+        uid = _norm_user_id(
+            row.get("user_id") or row.get("userId") or row.get("User ID") or row.get("telegram_id")
+        )
+        ds = _date_from_log_row(row)
         if not uid or not ds:
             continue
-        cin = row.get("check_in") or row.get("check_in_time") or row.get("time_in") or row.get("Приход")
-        cout = row.get("check_out") or row.get("check_out_time") or row.get("time_out") or row.get("Уход")
+
+        cin, cout = _row_check_in_out(row)
         if cin or cout:
-            flat[(uid, ds)] = {"user_id": uid, "date": ds, "check_in": cin or "", "check_out": cout or ""}
+            key = (uid, ds)
+            if key not in merged:
+                merged[key] = {"user_id": uid, "date": ds, "check_in": "", "check_out": ""}
+            if cin:
+                merged[key]["check_in"] = _time_min(merged[key]["check_in"], str(cin).strip())
+            if cout:
+                merged[key]["check_out"] = _time_max(merged[key]["check_out"], str(cout).strip())
             continue
-        t = row.get("time") or row.get("Time") or row.get("timestamp")
-        ev = str(row.get("event") or row.get("type") or row.get("action") or "").lower()
-        if not t:
+
+        t = row.get("time") or row.get("Time")
+        if not t and row.get("raw_timestamp"):
+            raw = str(row.get("raw_timestamp"))
+            if " " in raw:
+                t = raw.split(" ", 1)[1].strip()[:8]
+            elif "T" in raw:
+                t = raw.split("T", 1)[1][:8]
+        ev = str(row.get("event") or row.get("type") or row.get("action") or "")
+        direction = _event_direction(ev)
+        if not t or not direction:
             continue
-        if any(x in ev for x in ("in", "check_in", "приход", "вход")):
-            stream[(uid, ds)].append(("in", str(t).strip()))
-        elif any(x in ev for x in ("out", "check_out", "уход", "выход")):
-            stream[(uid, ds)].append(("out", str(t).strip()))
+        stream[(uid, ds)].append((direction, str(t).strip()))
 
     for key, pairs in stream.items():
         ins = [p[1] for p in pairs if p[0] == "in"]
         outs = [p[1] for p in pairs if p[0] == "out"]
-        if key in flat:
-            continue
-        flat[key] = {
-            "user_id": key[0],
-            "date": key[1],
-            "check_in": ins[0] if ins else "",
-            "check_out": outs[-1] if outs else "",
-        }
+        cin_s = ins[0] if ins else ""
+        cout_s = outs[-1] if outs else ""
+        if key in merged:
+            if cin_s:
+                merged[key]["check_in"] = _time_min(merged[key]["check_in"], cin_s)
+            if cout_s:
+                merged[key]["check_out"] = _time_max(merged[key]["check_out"], cout_s)
+        else:
+            merged[key] = {
+                "user_id": key[0],
+                "date": key[1],
+                "check_in": cin_s,
+                "check_out": cout_s,
+            }
 
-    return list(flat.values())
+    return list(merged.values())
 
 
 def _build_user_day_logs(logs: List[Dict[str, Any]]) -> Dict[Tuple[str, str], List[Dict[str, Any]]]:
     coerced = _coerce_log_rows(logs)
     by_key: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
     for row in coerced:
-        uid = str(row.get("user_id", "")).strip()
+        uid = _norm_user_id(row.get("user_id"))
         ds = _norm_date_key(row.get("date"))
         if uid and ds:
             by_key[(uid, ds)].append(row)
@@ -149,12 +289,16 @@ def _build_user_day_logs(logs: List[Dict[str, Any]]) -> Dict[Tuple[str, str], Li
 def _extract_check_times(day_rows: List[Dict[str, Any]]) -> Tuple[str, str]:
     if not day_rows:
         return "", ""
-    if len(day_rows) == 1:
-        r = day_rows[0]
-        return str(r.get("check_in") or "").strip(), str(r.get("check_out") or "").strip()
-    check_in = str(day_rows[0].get("check_in") or "").strip()
-    check_out = str(day_rows[-1].get("check_out") or "").strip()
-    return check_in, check_out
+    cin = ""
+    cout = ""
+    for r in day_rows:
+        ci = str(r.get("check_in") or "").strip()
+        co = str(r.get("check_out") or "").strip()
+        if ci:
+            cin = _time_min(cin, ci) if cin else ci
+        if co:
+            cout = _time_max(cout, co) if cout else co
+    return cin, cout
 
 
 def _resolve_day_status(
@@ -191,7 +335,7 @@ def calculate_today_summary(
     date_str = target_date.strftime("%Y-%m-%d")
     rows = []
     for user in users:
-        uid = str(user.get("user_id") or user.get("id") or "").strip()
+        uid = _norm_user_id(user.get("user_id") or user.get("id"))
         name = user.get("full_name") or user.get("name") or "—"
         if not uid:
             continue
@@ -257,8 +401,9 @@ def calculate_employee_month_analytics(
 ) -> Dict[str, Any]:
     holidays_map = _build_holidays_map(holidays)
     user_day_logs = _build_user_day_logs(logs)
+    tid = _norm_user_id(target_user_id)
     selected_user = next(
-        (u for u in users if str(u.get("user_id", "")).strip() == str(target_user_id).strip()),
+        (u for u in users if _norm_user_id(u.get("user_id")) == tid),
         None,
     )
     if not selected_user:
@@ -284,7 +429,7 @@ def calculate_employee_month_analytics(
     current = first_day
     while current <= last_day:
         date_str = current.strftime("%Y-%m-%d")
-        day_logs = user_day_logs.get((str(target_user_id).strip(), date_str), [])
+        day_logs = user_day_logs.get((tid, date_str), [])
         day_schedule = schedule_by_date.get(date_str)
         holiday_name = holidays_map.get(date_str)
         check_in, check_out = _extract_check_times(day_logs)
@@ -334,7 +479,7 @@ def calculate_employee_month_analytics(
     completion = int(round((total_minutes / norm_minutes) * 100)) if norm_minutes else 0
     emp_out = dict(selected_user)
     emp_out["fullName"] = full_name
-    emp_out["userId"] = str(target_user_id).strip()
+    emp_out["userId"] = tid
     return {
         "employee": emp_out,
         "stats": {
@@ -365,7 +510,7 @@ def calculate_timesheet(
     position_by_user_id: Dict[str, str] = {}
     position_by_full_name: Dict[str, str] = {}
     for item in employee_directory or []:
-        uid = str(item.get("user_id", "")).strip()
+        uid = _norm_user_id(item.get("user_id"))
         fn = str(item.get("full_name", "")).strip()
         pos = (
             item.get("position")
@@ -382,7 +527,7 @@ def calculate_timesheet(
 
     rows_out: List[Dict[str, Any]] = []
     for user in users:
-        user_id = str(user.get("user_id", "")).strip()
+        user_id = _norm_user_id(user.get("user_id"))
         full_name = user.get("full_name") or user.get("name") or "Без имени"
         position = position_by_user_id.get(user_id) or position_by_full_name.get(str(full_name).strip()) or "-"
         late_count = 0
@@ -443,7 +588,7 @@ def calculate_analytics(
     holidays_map = _build_holidays_map(holidays)
     schedule_index = _build_schedule_index(schedule)
     user_day_logs = _build_user_day_logs(logs)
-    user_ids = [str(u.get("user_id", "")).strip() for u in users if str(u.get("user_id", "")).strip()]
+    user_ids = [_norm_user_id(u.get("user_id")) for u in users if _norm_user_id(u.get("user_id"))]
 
     plan_dates: List[date] = []
     cur = first_day
@@ -467,7 +612,7 @@ def calculate_analytics(
         absent_any = False
         expected = 0
         for uid in user_ids:
-            u = next((x for x in users if str(x.get("user_id", "")).strip() == uid), None)
+            u = next((x for x in users if _norm_user_id(x.get("user_id")) == uid), None)
             fn = str(u.get("full_name") or u.get("name") or "").strip() if u else ""
             if (fn, ds) in schedule_index:
                 continue
