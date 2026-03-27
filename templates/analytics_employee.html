@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Аналитика сотрудника — Storylove{% endblock %}
+{% block content %}
+<h1>Аналитика: сотрудник</h1>
+<div class="toolbar">
+  <label>Месяц <input type="month" id="monthInput" /></label>
+  <label>Сотрудник
+    <select id="userSelect"><option value="">—</option></select>
+  </label>
+  <button type="button" id="loadBtn">Загрузить</button>
+  <a class="btn secondary" id="csvLink" href="#" style="display:none;">CSV</a>
+</div>
+<div id="err" class="error" style="display:none;"></div>
+<div id="empBlock" style="display:none;">
+  <h2 id="empTitle" class="muted"></h2>
+  <div class="stats" id="stats"></div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>День</th>
+          <th>Статус</th>
+          <th>Приход</th>
+          <th>Уход</th>
+          <th>Часы</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const STATUS_LABELS = {
+  absent: "Нет отметок",
+  working: "Работает (уход не отмечен)",
+  worked_no_checkout: "Отработал день (уход не отмечен)",
+  worked: "Отработал полный день",
+  underworked: "Недоработка",
+  late_and_underworked: "Опоздал и недоработал",
+  day_off: "Выходной",
+};
+
+function monthStr(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function loadUsers() {
+  const r = await fetch("/api/employees");
+  const j = await r.json();
+  if (!j.success) throw new Error(j.error);
+  const sel = document.getElementById("userSelect");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— выберите —</option>';
+  (j.data || []).forEach((u) => {
+    const id = String(u.user_id || u.userId || "");
+    const name = u.full_name || u.fullName || u.name || id;
+    const o = document.createElement("option");
+    o.value = id;
+    o.textContent = name;
+    sel.appendChild(o);
+  });
+  if (cur) sel.value = cur;
+}
+
+async function load() {
+  const month = document.getElementById("monthInput").value || monthStr();
+  document.getElementById("monthInput").value = month;
+  const uid = document.getElementById("userSelect").value;
+  const err = document.getElementById("err");
+  const block = document.getElementById("empBlock");
+  err.style.display = "none";
+  if (!uid) {
+    block.style.display = "none";
+    return;
+  }
+  try {
+    const r = await fetch(
+      `/api/attendance/analytics?month=${encodeURIComponent(month)}&user_id=${encodeURIComponent(uid)}`
+    );
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || "Ошибка");
+    const payload = j.data.employee;
+    if (!payload || payload.error) throw new Error("Сотрудник не найден");
+    const st = payload.stats || {};
+    const u = payload.employee || {};
+    const name = u.full_name || u.fullName || u.name || "";
+    document.getElementById("empTitle").textContent = name;
+    document.getElementById("stats").innerHTML = `
+      <div class="stat-card"><div class="label">Плановых дней</div><div class="value">${st.planDays ?? "—"}</div></div>
+      <div class="stat-card"><div class="label">Отработано дней</div><div class="value">${st.workDays ?? "—"}</div></div>
+      <div class="stat-card"><div class="label">Опозданий</div><div class="value">${st.lateCount ?? "—"}</div></div>
+      <div class="stat-card"><div class="label">Прогулов</div><div class="value">${st.absences ?? "—"}</div></div>
+      <div class="stat-card"><div class="label">Часы (факт)</div><div class="value">${st.workHours ?? "—"}</div></div>
+      <div class="stat-card"><div class="label">Норма часов</div><div class="value">${st.normHours ?? "—"}</div></div>
+      <div class="stat-card"><div class="label">% нормы</div><div class="value">${st.completionPercent ?? "—"}%</div></div>
+    `;
+    const tbody = document.getElementById("tbody");
+    tbody.innerHTML = (payload.days || [])
+      .map(
+        (day) => `<tr>
+        <td>${escapeHtml(day.date)}</td>
+        <td>${escapeHtml(day.weekday)}</td>
+        <td>${escapeHtml(STATUS_LABELS[day.status] || day.status)}</td>
+        <td>${escapeHtml(day.checkIn || "—")}</td>
+        <td>${escapeHtml(day.checkOut || "—")}</td>
+        <td>${escapeHtml(String(day.hoursWorked ?? "—"))}</td>
+      </tr>`
+      )
+      .join("");
+    block.style.display = "block";
+    const a = document.getElementById("csvLink");
+    a.href = `/api/attendance/export/employee.csv?month=${encodeURIComponent(month)}&user_id=${encodeURIComponent(uid)}`;
+    a.style.display = "inline-block";
+  } catch (e) {
+    err.textContent = String(e.message || e);
+    err.style.display = "block";
+    block.style.display = "none";
+  }
+}
+
+document.getElementById("monthInput").value = monthStr();
+document.getElementById("loadBtn").addEventListener("click", load);
+document.getElementById("userSelect").addEventListener("change", load);
+loadUsers().then(load).catch((e) => {
+  document.getElementById("err").textContent = String(e.message || e);
+  document.getElementById("err").style.display = "block";
+});
+</script>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Аналитика компании — Storylove{% endblock %}
+{% block content %}
+<h1>Аналитика: компания</h1>
+<div class="toolbar">
+  <label>Месяц <input type="month" id="monthInput" /></label>
+  <button type="button" id="loadBtn">Загрузить</button>
+  <a class="btn secondary" id="csvLink" href="#">Табель CSV</a>
+</div>
+<div id="err" class="error" style="display:none;"></div>
+<div id="block" style="display:none;">
+  <div class="stats" id="stats"></div>
+  <h2>Табель</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ФИО</th>
+          <th>Должность</th>
+          <th>Дней (факт)</th>
+          <th>Опозданий</th>
+          <th>Прогулов</th>
+          <th>Всего часов</th>
+          <th>Ср. ч/день</th>
+          <th>% нормы</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function monthStr(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function load() {
+  const month = document.getElementById("monthInput").value || monthStr();
+  document.getElementById("monthInput").value = month;
+  const err = document.getElementById("err");
+  err.style.display = "none";
+  document.getElementById("csvLink").href = `/api/attendance/export/company.csv?month=${encodeURIComponent(month)}`;
+  try {
+    const r = await fetch(`/api/attendance/analytics?month=${encodeURIComponent(month)}`);
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || "Ошибка");
+    const a = j.data.analytics || {};
+    const ts = j.data.timesheet || {};
+    document.getElementById("stats").innerHTML = `
+      <div class="stat-card"><div class="label">Рабочих дней в месяце (план)</div><div class="value">${a.planDays ?? "—"}</div></div>
+      <div class="stat-card"><div class="label">Средняя посещаемость (чел. в день)</div><div class="value">${a.avgPresentPerDay ?? "—"}</div></div>
+      <div class="stat-card"><div class="label">Дней с опозданиями / с прогулами</div><div class="value">${a.daysWithLate ?? "—"} / ${a.daysWithAbsence ?? "—"}</div></div>
+    `;
+    const rows = ts.rows || [];
+    document.getElementById("tbody").innerHTML = rows
+      .map(
+        (row) => `<tr>
+        <td>${escapeHtml(row.fullName)}</td>
+        <td>${escapeHtml(row.position)}</td>
+        <td>${row.workDaysFact}</td>
+        <td>${row.lateCount}</td>
+        <td>${row.absences}</td>
+        <td>${escapeHtml(row.totalHours)}</td>
+        <td>${escapeHtml(row.avgHoursPerDay)}</td>
+        <td>${row.completionPercent}%</td>
+      </tr>`
+      )
+      .join("");
+    document.getElementById("block").style.display = "block";
+  } catch (e) {
+    err.textContent = String(e.message || e);
+    err.style.display = "block";
+  }
+}
+
+document.getElementById("monthInput").value = monthStr();
+document.getElementById("loadBtn").addEventListener("click", load);
+load();
+</script>
+{% endblock %}

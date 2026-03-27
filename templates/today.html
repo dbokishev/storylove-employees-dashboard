@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Посещаемость — Storylove{% endblock %}
+{% block content %}
+<h1>Посещаемость по дате</h1>
+<div class="toolbar">
+  <label>Дата <input type="date" id="dateInput" /></label>
+  <button type="button" id="loadBtn">Обновить</button>
+</div>
+<div id="err" class="error" style="display:none;"></div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Сотрудник</th>
+        <th>Статус</th>
+        <th>Приход</th>
+        <th>Уход</th>
+        <th>Часы</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const STATUS_LABELS = {
+  absent: "Нет отметок",
+  working: "Работает (уход не отмечен)",
+  worked_no_checkout: "Отработал день (уход не отмечен)",
+  worked: "Отработал полный день",
+  underworked: "Недоработка",
+  late_and_underworked: "Опоздал и недоработал",
+  day_off: "Выходной / не работает",
+};
+
+function todayStr() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+async function load() {
+  const el = document.getElementById("dateInput");
+  const date = el.value || todayStr();
+  el.value = date;
+  const err = document.getElementById("err");
+  err.style.display = "none";
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "<tr><td colspan='5' class='muted'>Загрузка…</td></tr>";
+  try {
+    const r = await fetch(`/api/attendance/today?date=${encodeURIComponent(date)}`);
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || "Ошибка");
+    const rows = j.data.rows || [];
+    tbody.innerHTML = rows
+      .map(
+        (row) => `<tr>
+        <td>${escapeHtml(row.fullName)}</td>
+        <td>${escapeHtml(STATUS_LABELS[row.status] || row.status)}</td>
+        <td>${escapeHtml(row.checkIn || "—")}</td>
+        <td>${escapeHtml(row.checkOut || "—")}</td>
+        <td>${row.hoursWorked == null ? "—" : escapeHtml(String(row.hoursWorked))}</td>
+      </tr>`
+      )
+      .join("");
+    if (!rows.length) tbody.innerHTML = "<tr><td colspan='5' class='muted'>Нет данных</td></tr>";
+  } catch (e) {
+    err.textContent = String(e.message || e);
+    err.style.display = "block";
+    tbody.innerHTML = "";
+  }
+}
+
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+document.getElementById("loadBtn").addEventListener("click", load);
+document.getElementById("dateInput").addEventListener("change", load);
+document.getElementById("dateInput").value = todayStr();
+load();
+</script>
+{% endblock %}

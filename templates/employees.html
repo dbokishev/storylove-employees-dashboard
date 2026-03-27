@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Сотрудники — Storylove{% endblock %}
+{% block content %}
+<h1>Сотрудники</h1>
+<div id="err" class="error" style="display:none;"></div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>ФИО</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function load() {
+  const err = document.getElementById("err");
+  const tbody = document.getElementById("tbody");
+  err.style.display = "none";
+  tbody.innerHTML = "<tr><td colspan='2' class='muted'>Загрузка…</td></tr>";
+  try {
+    const r = await fetch("/api/employees");
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || "Ошибка");
+    const rows = j.data || [];
+    tbody.innerHTML = rows
+      .map(
+        (u) => `<tr>
+        <td>${escapeHtml(String(u.user_id || u.userId || ""))}</td>
+        <td>${escapeHtml(String(u.full_name || u.fullName || u.name || "—"))}</td>
+      </tr>`
+      )
+      .join("");
+    if (!rows.length) tbody.innerHTML = "<tr><td colspan='2' class='muted'>Пусто</td></tr>";
+  } catch (e) {
+    err.textContent = String(e.message || e);
+    err.style.display = "block";
+    tbody.innerHTML = "";
+  }
+}
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+load();
+</script>
+{% endblock %}

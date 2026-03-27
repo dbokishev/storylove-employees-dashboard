@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Storylove — сотрудники{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header>
+    <strong>Storylove</strong>
+    <nav>
+      <a href="{{ url_for('index') }}">Сегодня</a>
+      <a href="{{ url_for('employees_page') }}">Сотрудники</a>
+      <a href="{{ url_for('analytics_employee_page') }}">Аналитика: сотрудник</a>
+      <a href="{{ url_for('analytics_company_page') }}">Аналитика: компания</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
