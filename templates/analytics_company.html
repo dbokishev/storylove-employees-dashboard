@@ -5,7 +5,7 @@
   <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
     <div>
       <h1 class="text-3xl font-bold text-gray-900">Аналитика по компании</h1>
-      <p class="text-sm text-gray-500 mt-1">Сводный табель и календарь по команде за месяц</p>
+      <p class="text-sm text-gray-500 mt-1">Сводный табель по команде за месяц</p>
     </div>
     <div class="flex flex-wrap gap-3 items-end">
       <div>
@@ -23,20 +23,6 @@
     <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">Рабочих дней в месяце</div><div class="text-2xl font-bold" x-text="stats.totalDays"></div></div>
     <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">Средняя посещаемость</div><div class="text-2xl font-bold" x-text="stats.avgPresent"></div></div>
     <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">Дней с опозданиями / прогулами</div><div class="text-2xl font-bold"><span x-text="stats.lateDays"></span> / <span x-text="stats.absentDays"></span></div></div>
-  </div>
-
-  <div class="bg-white rounded-lg shadow p-4 mb-8" x-show="calendarEntries.length">
-    <h2 class="text-lg font-semibold text-gray-900 mb-3">Календарь (рабочие дни)</h2>
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7 gap-2">
-      <template x-for="day in calendarEntries" :key="day.date">
-        <div class="border rounded-lg p-2 text-xs" :class="dayClass(day.status)">
-          <div class="font-semibold" x-text="day.date"></div>
-          <div>Пришли: <span x-text="day.present"></span></div>
-          <div>Прогулы: <span x-text="day.absent"></span></div>
-          <div>Опозд.: <span x-text="day.late"></span></div>
-        </div>
-      </template>
-    </div>
   </div>
 
   <div class="bg-white rounded-lg shadow overflow-hidden" x-show="timesheet.rows?.length">
@@ -80,27 +66,13 @@ function companyAnalyticsPage() {
   return {
     selectedMonth: m,
     stats: { totalDays: 0, avgPresent: 0, lateDays: 0, absentDays: 0 },
-    calendar: {},
     timesheet: { rows: [] },
-    get calendarEntries() {
-      return Object.entries(this.calendar || {}).map(([date, v]) => ({ date, ...v }));
-    },
-    dayClass(status) {
-      const map = {
-        perfect: "bg-emerald-50 border-emerald-200",
-        good: "bg-lime-50 border-lime-200",
-        warning: "bg-amber-50 border-amber-200",
-        bad: "bg-rose-50 border-rose-200",
-      };
-      return map[status] || "bg-gray-50 border-gray-200";
-    },
     async init() { await this.loadData(); },
     async loadData() {
       const r = await fetch(`/api/attendance/analytics?month=${this.selectedMonth}`);
       const j = await r.json();
       if (!j.success) return;
       this.stats = j.data.stats || this.stats;
-      this.calendar = j.data.calendar || {};
       this.timesheet = j.data.timesheet || { rows: [] };
     },
   };
