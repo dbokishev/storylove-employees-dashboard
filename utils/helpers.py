@@ -342,7 +342,8 @@ def calculate_today_summary(
         fn = str(name).strip()
         holiday_name = holidays_map.get(date_str)
         personal_off = (fn, date_str) in schedule_index
-        is_day_off = _is_weekend(target_date) or bool(holiday_name) or personal_off
+        # Выходные по календарю не помечаем: график задаётся листом Schedule позже.
+        is_day_off = bool(holiday_name) or personal_off
         if is_day_off:
             rows.append(
                 {
@@ -434,7 +435,7 @@ def calculate_employee_month_analytics(
         holiday_name = holidays_map.get(date_str)
         check_in, check_out = _extract_check_times(day_logs)
         personal_off = (full_name, date_str) in schedule_index
-        is_day_off = _is_weekend(current) or bool(holiday_name) or personal_off
+        is_day_off = bool(holiday_name) or personal_off
         is_plan_day = (
             not _is_weekend(current) and not holiday_name and not personal_off
         )
