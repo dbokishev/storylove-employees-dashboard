@@ -4,6 +4,9 @@ services:
     name: storylove-employees-dashboard
     runtime: python
     plan: free
+    branch: main
+    # Деплой при каждом push в ветку branch (см. dashboard → Auto-Deploy)
+    autoDeployTrigger: commit
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
     envVars:
